@@ -1,183 +1,113 @@
-const express = require('express');
-const cors = require('cors');
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-require('dotenv').config();
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-
-// Middlewares
 app.use(cors());
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json());
 
-// ==========================================
-// 1. MONGODB ATLAS CONNECTION
-// ==========================================
+// 1. MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI;
-const JWT_SECRET = process.env.JWT_SECRET || 'EngVerseSecretKey2026';
+mongoose
+  .connect(MONGO_URI)
+  .then(() => console.log("MongoDB Connected Successfully"))
+  .catch((err) => console.error("MongoDB Connection Error:", err.message));
 
-if (MONGO_URI) {
-  mongoose.connect(MONGO_URI)
-    .then(() => console.log('MongoDB Atlas Connected Successfully!'))
-    .catch((err) => console.error('MongoDB Connection Error:', err));
-} else {
-  console.log('WARNING: MONGO_URI environment variable not found in Render!');
-}
-
-// ==========================================
-// 2. USER DATABASE SCHEMA (Student/User Profile)
-// ==========================================
+// 2. User Schema (Approval & IELTS access sobat)
 const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-  password: {
-    type: String,
-    required: true
-  },
-  role: {
-    type: String,
-    default: 'student'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  isApproved: { type: Boolean, default: false },     // General app login access
+  hasIeltsAccess: { type: Boolean, default: false }, // Exclusive IELTS access
+  createdAt: { type: Date, default: Date.now }
 });
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model("User", userSchema);
 
-// ==========================================
-// 3. AUTHENTICATION APIS (Signup & Login)
-// ==========================================
-
-// Navin account banavnyasathi (Register)
-app.post('/api/auth/register', async (req, res) => {
+// 3. Register Route
+app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email and password are required.' });
-    }
-
-    // Email adhich register ahe ka check karne
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ error: 'This email is already registered.' });
+      return res.status(400).json({ error: "Email already registered." });
     }
 
-    // Password सुरक्षित (hash) karne
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Navin user database madhe save karne
     const newUser = new User({
       name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      isApproved: false,     // By default pending rahil
+      hasIeltsAccess: false  // By default IELTS locked rahil
     });
 
     await newUser.save();
-    return res.status(201).json({ message: 'Account created successfully!' });
+    res.status(201).json({ 
+      message: "Account created! Access will be activated upon admin approval." 
+    });
   } catch (error) {
-    console.error('Registration Error:', error);
-    return res.status(500).json({ error: 'Registration failed: ' + error.message });
+    res.status(500).json({ error: "Registration failed: " + error.message });
   }
 });
 
-// Login karnyasathi (Login & JWT Token)
-app.post('/api/auth/login', async (req, res) => {
+// 4. Login Route
+app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
-    }
-
-    // User shodhane
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ error: 'Invalid email or password.' });
+      return res.status(400).json({ error: "Invalid email or password." });
     }
 
-    // Password barobar ahe ka check karne
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ error: 'Invalid email or password.' });
+      return res.status(400).json({ error: "Invalid email or password." });
     }
 
-    // Login sathi Token generate karne
+    // CHECK: Admin ne approve kela ahe ka
+    if (!user.isApproved) {
+      return res.status(403).json({ 
+        error: "Your account is pending verification by EngVerse Admin. Please contact admin for activation." 
+      });
+    }
+
     const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET || "engverse_secret_key",
+      { expiresIn: "7d" }
     );
 
-    return res.json({
-      message: 'Login successful!',
+    res.json({
+      message: "Login successful",
       token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        role: user.role
+        isApproved: user.isApproved,
+        hasIeltsAccess: user.hasIeltsAccess
       }
     });
   } catch (error) {
-    console.error('Login Error:', error);
-    return res.status(500).json({ error: 'Login failed: ' + error.message });
+    res.status(500).json({ error: "Login failed: " + error.message });
   }
 });
 
-// ==========================================
-// 4. TUMCHA JUNA CODE (Health & Gemini API)
-// ==========================================
-
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'UP',
-    application: 'EngVerse IELTS Evaluation Engine',
-    version: '1.0.0'
-  });
+// 5. Root test route
+app.get("/", (req, res) => {
+  res.send("EngVerse Backend is Running Live!");
 });
 
-app.post('/api/gemini', async (req, res) => {
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY missing.' });
-    }
-
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
-    const apiResponse = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-
-    const data = await apiResponse.json();
-    return res.status(apiResponse.status).json(data);
-  } catch (error) {
-    console.error('Gemini Backend Error:', error);
-    return res.status(500).json({ error: 'Internal server error processing evaluation.' });
-  }
-});
-
-// ==========================================
-// 5. SERVER START
-// ==========================================
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`EngVerse Server is running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });

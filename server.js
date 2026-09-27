@@ -16,7 +16,7 @@ mongoose
   .then(() => console.log("MongoDB Connected Successfully"))
   .catch((err) => console.error("MongoDB Connection Error:", err.message));
 
-// 2. User Schema (Role, Approval, IELTS, Phone aani Fees Status sobat)
+// 2. User Schema (Role, Approval, IELTS, Phone, Fees & Block/Due Date)
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -26,6 +26,8 @@ const userSchema = new mongoose.Schema({
   isApproved: { type: Boolean, default: false },     // General app login access
   hasIeltsAccess: { type: Boolean, default: false }, // Exclusive IELTS access
   feesPaid: { type: Boolean, default: false },       // Fees Status (Paid / Pending)
+  feeDueDate: { type: Date, default: null },         // 2nd Installment Due Date
+  isBlocked: { type: Boolean, default: false },      // Temporary Account Suspension
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -52,7 +54,9 @@ app.post("/api/auth/register", async (req, res) => {
       role: "student",
       isApproved: false,
       hasIeltsAccess: false,
-      feesPaid: false
+      feesPaid: false,
+      isBlocked: false,
+      feeDueDate: null
     });
 
     await newUser.save();
@@ -64,7 +68,7 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-// 4. Login Route
+// 4. Login Route (With Approval & Block Checks)
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -79,10 +83,17 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(400).json({ error: "Invalid email or password." });
     }
 
-    // Jar user student asel aani approve nasel tar block kara
+    // 1. Check Approval
     if (user.role !== "admin" && !user.isApproved) {
       return res.status(403).json({ 
         error: "Your account is pending verification by EngVerse Admin. Please contact admin for activation." 
+      });
+    }
+
+    // 2. Check Temporary Block (Fees Dues)
+    if (user.role !== "admin" && user.isBlocked) {
+      return res.status(403).json({ 
+        error: "Your account has been temporarily suspended due to pending installment dues. Kindly clear the fees to restore access." 
       });
     }
 
@@ -103,7 +114,9 @@ app.post("/api/auth/login", async (req, res) => {
         role: user.role,
         isApproved: user.isApproved,
         hasIeltsAccess: user.hasIeltsAccess,
-        feesPaid: user.feesPaid
+        feesPaid: user.feesPaid,
+        feeDueDate: user.feeDueDate,
+        isBlocked: user.isBlocked
       }
     });
   } catch (error) {
@@ -181,15 +194,51 @@ app.post("/api/admin/toggle-fees", verifyAdmin, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
 
     user.feesPaid = !user.feesPaid;
+    // जर फी पूर्ण भरली असेल तर आपोआप अनब्लॉक करा
+    if (user.feesPaid) {
+      user.isBlocked = false;
+    }
     await user.save();
 
-    res.json({ success: true, feesPaid: user.feesPaid });
+    res.json({ success: true, feesPaid: user.feesPaid, isBlocked: user.isBlocked });
   } catch (err) {
     res.status(500).json({ error: "Failed to update fees status: " + err.message });
   }
 });
 
-// 9. Update Student Phone (CRM)
+// 9. Toggle Temporary Block Status
+app.post("/api/admin/toggle-block", verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.isBlocked = !user.isBlocked;
+    await user.save();
+
+    res.json({ success: true, isBlocked: user.isBlocked });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to toggle block status: " + err.message });
+  }
+});
+
+// 10. Update 2nd Installment Due Date
+app.post("/api/admin/update-due-date", verifyAdmin, async (req, res) => {
+  try {
+    const { userId, feeDueDate } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.feeDueDate = feeDueDate ? new Date(feeDueDate) : null;
+    await user.save();
+
+    res.json({ success: true, message: "Due date updated successfully", feeDueDate: user.feeDueDate });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update due date: " + err.message });
+  }
+});
+
+// 11. Update Student Phone (CRM)
 app.post("/api/admin/update-phone", verifyAdmin, async (req, res) => {
   try {
     const { userId, phone } = req.body;
@@ -205,7 +254,7 @@ app.post("/api/admin/update-phone", verifyAdmin, async (req, res) => {
   }
 });
 
-// 10. Delete Student Permanently
+// 12. Delete Student Permanently
 app.delete("/api/admin/user/:userId", verifyAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -217,7 +266,7 @@ app.delete("/api/admin/user/:userId", verifyAdmin, async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("EngVerse Backend with Secure Admin Panel & CRM is Live!");
+  res.send("EngVerse Backend with Complete CRM & Automation is Live!");
 });
 
 // Quick One-Click Admin Setup Route

@@ -16,14 +16,16 @@ mongoose
   .then(() => console.log("MongoDB Connected Successfully"))
   .catch((err) => console.error("MongoDB Connection Error:", err.message));
 
-// 2. User Schema (Role, Approval aani IELTS Flags sobat)
+// 2. User Schema (Role, Approval, IELTS, Phone aani Fees Status sobat)
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+  phone: { type: String, default: "" },              // WhatsApp CRM contact
   role: { type: String, default: "student" },        // "admin" kiva "student"
   isApproved: { type: Boolean, default: false },     // General app login access
   hasIeltsAccess: { type: Boolean, default: false }, // Exclusive IELTS access
+  feesPaid: { type: Boolean, default: false },       // Fees Status (Paid / Pending)
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -32,7 +34,7 @@ const User = mongoose.model("User", userSchema);
 // 3. Register Route
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone } = req.body;
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -45,10 +47,12 @@ app.post("/api/auth/register", async (req, res) => {
     const newUser = new User({
       name,
       email,
+      phone: phone || "",
       password: hashedPassword,
       role: "student",
       isApproved: false,
-      hasIeltsAccess: false
+      hasIeltsAccess: false,
+      feesPaid: false
     });
 
     await newUser.save();
@@ -95,9 +99,11 @@ app.post("/api/auth/login", async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         isApproved: user.isApproved,
-        hasIeltsAccess: user.hasIeltsAccess
+        hasIeltsAccess: user.hasIeltsAccess,
+        feesPaid: user.feesPaid
       }
     });
   } catch (error) {
@@ -167,9 +173,53 @@ app.post("/api/admin/toggle-ielts", verifyAdmin, async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("EngVerse Backend with Secure Admin Panel is Live!");
+// 8. Toggle Fees Status (Paid / Pending)
+app.post("/api/admin/toggle-fees", verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.feesPaid = !user.feesPaid;
+    await user.save();
+
+    res.json({ success: true, feesPaid: user.feesPaid });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update fees status: " + err.message });
+  }
 });
+
+// 9. Update Student Phone (CRM)
+app.post("/api/admin/update-phone", verifyAdmin, async (req, res) => {
+  try {
+    const { userId, phone } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.phone = phone;
+    await user.save();
+
+    res.json({ success: true, message: "Phone updated successfully", phone: user.phone });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update phone: " + err.message });
+  }
+});
+
+// 10. Delete Student Permanently
+app.delete("/api/admin/user/:userId", verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    await User.findByIdAndDelete(userId);
+    res.json({ success: true, message: "Student deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete student: " + err.message });
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("EngVerse Backend with Secure Admin Panel & CRM is Live!");
+});
+
 // Quick One-Click Admin Setup Route
 app.get("/make-me-admin", async (req, res) => {
   try {

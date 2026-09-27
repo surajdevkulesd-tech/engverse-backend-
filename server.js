@@ -170,6 +170,23 @@ app.post("/api/admin/toggle-ielts", verifyAdmin, async (req, res) => {
 app.get("/", (req, res) => {
   res.send("EngVerse Backend with Secure Admin Panel is Live!");
 });
+// Quick One-Click Admin Setup Route
+app.get("/make-me-admin", async (req, res) => {
+  try {
+    const adminEmail = "engverse36@gmail.com";
+    const user = await User.findOneAndUpdate(
+      { email: adminEmail },
+      { role: "admin", isApproved: true },
+      { new: true }
+    );
+    if (!user) {
+      return res.send(`User ${adminEmail} sapadla nahi. Aadhi ya email ne Signup kara!`);
+    }
+    res.send(`🎉 Mubarak! ${adminEmail} aata official ADMIN aani APPROVED jhala ahe!`);
+  } catch (err) {
+    res.send("Error: " + err.message);
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
